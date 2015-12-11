@@ -1,0 +1,40 @@
+import RPi.GPIO as GPIO
+import sysv_ipc
+import time
+
+memory = sysv_ipc.SharedMemory(1004)
+
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(12, GPIO.OUT)
+
+p = GPIO.PWM(12, 200)
+p.start(0)
+value=21
+offer='A'
+try:
+	p.ChangeDutyCycle(value)
+	time.sleep(0.02)
+	while True:
+			vari = memory.read()
+			if offer in vari :
+				print("in")
+			else :
+				if 'A' in vari:
+					print("A")
+#					print(p.DutyCycle)
+					value=21
+				elif 'B' in vari:
+					print("B")
+					value=0
+				elif 'C' in vari:
+					print("C")
+					value=22
+				break
+			offer=vari
+
+
+except KeyboardInterrupt:
+	pass
+p.stop()
+GPIO.cleanup()
+
