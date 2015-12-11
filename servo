@@ -1,0 +1,77 @@
+import RPi.GPIO as GPIO
+import sysv_ipc
+import time
+
+memory = sysv_ipc.SharedMemory(1005)
+
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(11, GPIO.OUT)
+
+p = GPIO.PWM(11, 50)
+p.start(6.9)	#7.5
+
+mid = 6.9	#6.9
+cnt = 6.9
+
+try:
+	while True:
+		vari = memory.read()
+
+		if 'f' in vari :
+			print("f")
+			cnt=mid
+		elif 'G' in vari :
+			print("G")
+			cnt=mid-0.2
+		elif 'H' in vari :
+			print("H")
+			cnt=mid-0.4
+		elif 'I' in vari :
+			print("I")
+			cnt=mid-0.6
+		elif 'J' in vari :
+			print("J")
+			cnt=mid-0.8
+		elif 'K' in vari :
+			print("K")
+			cnt=mid-1
+		elif 'L' in vari :
+			print("L")
+			cnt=mid-1.4
+		elif 'M' in vari :
+			print("M")
+			cnt=mid-1.8
+		elif 'N' in vari :
+			print("N")
+			cnt=mid-2.2
+		elif 'g' in vari :
+			print("g")
+			cnt=mid+0.2
+		elif 'h' in vari :
+			print("h")
+			cnt=mid+0.4
+		elif 'i' in vari :
+			print("i")
+			cnt=mid+0.6
+		elif 'j' in vari :
+			print("j")
+			cnt=mid+0.8
+		elif 'k' in vari :
+			print("k")
+			cnt=mid+1
+		elif 'l' in vari :
+			print("l")
+			cnt=mid+1.4
+		elif 'm' in vari :
+			print("m")
+			cnt=mid+1.8
+		elif 'n' in vari :
+			print("n")
+			cnt=mid+2.2
+		p.ChangeDutyCycle(cnt)
+		time.sleep(2)
+
+except KeyboardInterrupt:
+	p.stop()
+	GPIO.cleanup()
+
