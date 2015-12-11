@@ -1,0 +1,358 @@
+#include <iostream>
+#include <boost/array.hpp>
+#include <boost/asio.hpp>
+#include <boost/container/vector.hpp> 
+#include <opencv2/objdetect/objdetect.hpp>
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/core/core.hpp>  
+#include <ctime>
+#include <string>
+#include <boost/thread/thread.hpp>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+using boost::asio::ip::tcp;
+using boost::asio::ip::udp;
+using namespace std;
+using namespace cv;
+
+#define PI 3.1415926
+#define HIGHT   240
+#define WIDTH   320
+
+#define EPS 0.0001 // epsilon
+
+typedef struct _Liner 
+{
+ // Line : ax + by = c
+ double a;
+ double b;
+ double c;
+}Liner, *pLiner;
+
+
+Liner getLine(double x1, double y1, double x2, double y2) 
+{
+ Liner line;
+ line.a = y1 - y2;
+ line.b = x2 - x1;
+ line.c = (x1 * y2) - (y1 * x2);
+ return line;
+}
+
+
+bool getCrossPoint(Liner line1, Liner line2, Point* pPoint)
+{
+ double a1 = line1.a;
+ double b1 = line1.b;
+ double c1 = line1.c;
+ double a2 = line2.a;
+ double b2 = line2.b;
+ double c2 = line2.c;
+ double t1,t2;
+
+ if(((fabs(a1) < EPS) && (fabs(b1) < EPS)) || ((fabs(a2) < EPS) && (fabs(b2) < EPS)))
+  return false;
+ if(fabs(a1*b2 - a2*b1) < EPS)
+  return false;
+ if(fabs(a1) > EPS)
+ {
+  t1 = b2 - (a2 * b1) / a1;
+  t2 = (c1 * a2) / a1 - c2;
+  if(fabs(t1) < EPS) 
+   return false;
+  pPoint->y = t2 / t1;
+  pPoint->x = -(b1 / a1) * pPoint->y - (c1 / a1);
+ }
+ else
+ {
+  t1 = a2 - (a1 * b2) / b1;
+  t2 = (c1 * b2) / b1-c2;
+  if(fabs(t1) < EPS)
+   return false;
+  pPoint->x = t2 / t1;
+  pPoint->y = -(a1 / b1) * pPoint->x - c1 / b1;
+ }
+ return true;
+}
+
+
+Mat setRoi(int x, int y, int width, int height, Mat img){
+   Rect rect; 
+   rect.x=x; rect.y=y;
+   rect.width=width; rect.height=height;
+   return(img(rect)); 
+}
+
+
+int Control(Point cross)
+{
+   if(cross.x>=150&&cross.x<=170)
+      return 0;
+   else
+   {
+      if(cross.x!=160){
+            return ((cross.x-160)/10);
+      }
+      else
+         return 0;
+   }
+}
+
+
+bool subcnt = true;
+int shmid2;
+//int *control;
+Point Def(160,0);
+void sub_main(Mat Inimage)
+{
+	Point p1[100], p2[100]; 
+	Point cross=Def; 
+	int count=0; 
+	bool leftline=true, rightline=true; 
+	Mat dst, color_dst;
+	Liner Lines[100]={0}; 
+
+	int controldata = 0;
+ 
+	Mat image=Inimage;
+	cv::namedWindow("Input Image");   cv::imshow("Input Image",image); 
+	cv::namedWindow("cut Image");
+	std::cout << "image.rows= " << image.rows<<"image.cos"<<image.cols<<endl;
+	GaussianBlur(image,image,Size(3,3),1.0,1.0); 
+	Canny( image, dst, 100, 345, 3 );
+	cvtColor( dst, color_dst, CV_GRAY2BGR ); 
+	dst=setRoi(0,190,WIDTH,HIGHT-210,dst); 
+	std::cout << "dst.rows= " << dst.rows<<"dst.cos"<<dst.cols<<endl;
+    
+    vector<Vec2f> lines; 
+
+	HoughLines( dst, lines, 1, CV_PI/180, 30);   
+	 
+    for( size_t i = 0; i < lines.size(); i++ )
+    {
+        float rho = lines[i][0]; 
+        float theta = lines[i][1]; 
+		Point pt1, pt2; 
+		double scale = 1000.0; // The line is clipped by the image boundaries.
+        double a = cos(theta), b = sin(theta); 
+        double x0 = a*(rho), y0 = b*(rho); 
+		
+		pt1.x = cvRound(x0 + scale*(-b));   // ptr1.x = x0 + scale*(-sin(theta))
+		pt1.y = cvRound(y0 + scale*(a));   // ptr1.y = y0 + scale*(cos(theta))   
+		pt2.x = cvRound(x0 - scale*(-b));   // ptr2.x = x0 - scale*(-sin(theta))
+		pt2.y = cvRound(y0 - scale*(a));   // ptr2.x = y0 - scale*(cos(theta))
+		//cout << "pt1.x= " << pt1.x << "    pt1.y=  " << pt1.y <<endl; 
+		//cout << "pt2.x= " << pt2.x << "    pt2.y=  " << pt2.y <<endl;
+		pt1.y=pt1.y+190;
+		pt2.y=pt2.y+190;
+
+		if(((pt2.y<0))&&count<2&&leftline==true){
+			line( color_dst, pt1, pt2, Scalar(0,0,255), 1, 8 );      // Line thickness = 1, 8 connected line
+			p1[count].x=pt1.x; p1[count].y=pt1.y;
+			p2[count].x=pt2.x; p2[count].y=pt2.y;
+			count++;
+			leftline=false;
+      }
+      else if((pt2.y>0)&&count<2&&rightline==true){
+            line( color_dst, pt1, pt2, Scalar(0,0,255), 1, 8 );      // Line thickness = 1, 8 connected line
+            p1[count].x=pt1.x; p1[count].y=pt1.y;
+            p2[count].x=pt2.x; p2[count].y=pt2.y;
+            count++;
+            rightline=false;
+      }
+     
+      imshow( "Detected Lines", color_dst ); 
+      //  2 pi : 360 = x[rad] =: y[deg]. 
+      //std::cout << "rho = " << rho << "    theta[rad]=  " << theta << "   theta[deg]= " << 360.0 * theta / (2 * 3.14)  << std::endl;
+      imshow("cut Image",dst); 
+      //waitKey(0);
+    }
+	for(int i=0; i<=count;i++)
+	{
+		Lines[i]=getLine(p1[i].x,p1[i].y,p2[i].x,p2[i].y); 
+	}
+  
+	if(count=2)
+		getCrossPoint(Lines[0],Lines[1],&cross);
+	if(cross.y<0){ 
+		cross.y=5;
+		circle(color_dst,cross,5,Scalar(0,255,0), 1, 8);
+	}
+	else{
+		circle(color_dst,cross,5,Scalar(0,255,0), 1, 8); 
+		Def=cross;	
+		cout<<"def ="<<Def<<endl;
+	}
+	
+	controldata=Control(cross);
+
+	if(subcnt==true)
+	{
+		shmid2 =shmget((key_t)1005,sizeof(int), 0777|IPC_CREAT);
+		if(shmid2==-1)
+		{
+			perror("shmget failed");
+		}
+		subcnt=false;	
+	}			
+	else
+	{
+		int *control=(int*)shmat(shmid2,NULL,0);
+		
+		if(controldata<3&&controldata>=-3)
+			*control='f';
+		else if(controldata<6&&controldata>=3)
+			*control='G'; 
+		else if(controldata<9&&controldata>=6)
+			*control='H';
+		else if(controldata<12&&controldata>=9)
+			*control='I';
+		else if(controldata<15&&controldata>=12)
+			*control='J';
+		else if(controldata<18&&controldata>=15)
+			*control='K';
+		else if(controldata<40&&controldata>=18)
+			*control='L';
+		else if(controldata<60&&controldata>=40)
+			*control='M';
+		else if(controldata<80&&controldata>=60)
+			*control='N';
+		else if(controldata<-3&&controldata>=-6)
+			*control='g';
+		else if(controldata<-6&&controldata>=-9)
+			*control='h';
+		else if(controldata<-9&&controldata>=-12)
+			*control='i';
+		else if(controldata<-12&&controldata>=-15)
+			*control='j';
+		else if(controldata<-15&&controldata>=-18)
+			*control='k';
+		else if((controldata<-18&&controldata>=-40))
+			*control='l';
+		else if(controldata<-40&&controldata>=-60)
+			*control='m';
+		else if(controldata<-60&&controldata>=-80)
+			*control='n';
+		else if(controldata>80 )
+			*control='N';
+		else if(controldata<-80)
+			*control='n';
+		if(control==NULL)
+		{
+			perror("shmat failed:");
+		}
+ 
+    namedWindow( "Detected Lines", 1 );
+    imshow( "Detected Lines", color_dst );
+}
+
+
+bool cnt=true;
+int shmid;
+
+
+void ReceiveResult()
+{ 
+	try
+	{
+		boost::array<int,1> buf;
+		boost::asio::io_service io_service;
+		tcp::endpoint end_point(boost::asio::ip::address::from_string("121.138.120.244"), 3201);
+		
+		tcp::socket socket(io_service);
+		socket.close();
+		socket.connect(end_point);
+		boost::system::error_code error;
+		for (;;)
+		{ 
+			size_t len = socket.read_some(boost::asio::buffer(buf), error);
+
+			if (error == boost::asio::error::eof)
+				break; // Connection closed cleanly by peer.
+			else if (error)
+				throw boost::system::system_error(error); // Some other error.
+			if(cnt==true)
+			{
+				shmid =shmget((key_t)1004,sizeof(int), 0777|IPC_CREAT);
+				if(shmid==-1)
+				{
+					perror("shmget failed");
+				}
+				cnt=false;	
+			}			
+			else
+			{
+				int *cmd=(int*)shmat(shmid,NULL,0);
+						
+				if(buf[0]==100)
+					*cmd='A';
+				else if(buf[0]==200)
+					*cmd='B';
+				else if(buf[0]==300)
+					*cmd='C';
+			}
+			cout<<buf[0]<<endl;			
+		}
+		socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, error);
+		socket.close();
+		 
+	}
+	catch (std::exception& e)
+	{
+		std::cerr << e.what() << std::endl;
+	}
+}
+
+int main(int argc, char* argv[])
+{
+	boost::thread thrd(&ReceiveResult);
+
+	VideoCapture cap(0);                        /* open webcam */
+	Mat frame;
+
+	vector<int> param = vector<int>(2);
+	param[0]=CV_IMWRITE_JPEG_QUALITY;
+	param[1]=95; 
+	 
+
+    if(!cap.isOpened())  
+    {  
+        return -1;  
+    }  
+
+    cap.set(CV_CAP_PROP_FRAME_WIDTH, 320);      /* set width */
+    cap.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
+
+	try
+	{
+     
+
+		boost::asio::io_service io_service;
+		udp::endpoint end_point(boost::asio::ip::address::from_string("121.138.120.244"), 3200);
+		udp::socket socket(io_service);
+		socket.open(udp::v4());
+		 
+		while(true)
+		{
+			cap>>frame;
+			vector<uchar> buff;
+
+			cv::imencode(".jpg", frame, buff, param);
+			
+			sub_main(frame);
+			waitKey(10); 
+			
+			socket.send_to(boost::asio::buffer(buff), end_point); 
+		}
+	}
+	catch (std::exception& e)
+	{
+		std::cerr << e.what() << std::endl;
+	}
+
+	thrd.join();
+	return 0;
+}
+
